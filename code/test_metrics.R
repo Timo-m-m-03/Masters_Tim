@@ -8,7 +8,9 @@ library(lidR)
 library(rgl)
 library(gstat)
 library(tidyverse)
-
+install.packages("silviculture")
+library(silviculture)
+library(sf)
 # Loading in data 
 
 las <- readLAS("data/raw/2021/W57D_4.las")
@@ -85,6 +87,7 @@ names(pmet)
 
 plot(pmet$zmean)
 
+
 # Voxel metrics
 
 ?voxel_metrics
@@ -93,8 +96,92 @@ vmet <- voxel_metrics(nlas, .stdmetrics, 10, filter = ~Classification == 1)
 
 plot(vmet$zmean)
 
+# Standard deviation of height for the plot
+
+sdH <- cloud_metrics(nlas,.stdmetrics, filter = ~Classification == 1)
+print(sdH)
+
+f_canopy_height_sd <- function(z, threshold = 2) {
+  z <- as.numeric(z)
+  
+  # Filter to canopy points only (Hi values)
+  canopy_heights <- z[z >= threshold]
+  
+  # Check if there are any canopy points
+  if (length(canopy_heights) == 0) {
+    return(list(
+      canopy_sd   = NA,
+      canopy_mean = NA,
+      n_canopy    = 0
+    ))
+  }
+  
+  # Calculate mean canopy height (H̄)
+  H_bar <- mean(canopy_heights)
+  
+  # Calculate standard deviation using the formula
+  n <- length(canopy_heights)
+  sigma_H <- sqrt(sum((canopy_heights - H_bar)^2) / (n - 1))
+  
+  return(list(
+    canopy_sd   = round(sigma_H, 3),
+    canopy_mean = round(H_bar, 3),
+    n_canopy    = n
+  ))
+}
+
+# Apply to whole plot
+height_sd_result <- cloud_metrics(nlas, ~f_canopy_height_sd(Z, threshold = 2))
+print(height_sd_result)
+
+#### Canopy height density (CHD) ####
+
+f_canopy_height_density <- function(z, threshold = 2,area){
+  z <- as.numeric(z)
+  
+  # Filter canopy points
+  n <- sum(z>= threshold)
+  
+  # Canopy height density
+  points <- n/area
+  
+  return(points)
+}
+
+plot_area <- as.numeric(st_area(st_as_sfc(st_bbox(nlas))))
+
+canopy_height_density <- cloud_metrics(nlas, ~f_canopy_height_density(Z, threshold = 2, area = plot_area))
+print(canopy_height_density)
+
+#### Symmetry of canopy ####
+#Need to work on this
+
+f_canopy_symmetry <- function(z, threshold = 2) {
+  z <- as.numeric(z)
+  
+  # Filter to canopy points only (Hi values)
+  canopy_heights <- z[z >= threshold]
+  
+  # Calculate mean canopy height (H̄)
+  H_bar <- mean(canopy_heights)
+  
+  # Number of points
+  n <- length(canopy_heights)
+  
+  #Standard deviation
+  sd_val <- sd(canopy_heights)
+  
+  # Calculate standard deviation using the formula
+  sym <- sum((canopy_heights - H_bar)/(sd_val^3*(n-1)))
+  
+  return(sym)
+}
+
+canopy_symmetry <- cloud_metrics(nlas, ~f_canopy_symmetry(Z, threshold = 2))
+print(canopy_symmetry)
+
 #### Canopy Cover of plot ####
-# For all these you need to set the threashold height for what you consider the canopy
+# For all these you need to set the threshold height for what you consider the canopy
 
 # Online function
 
@@ -168,3 +255,34 @@ cover_result_1 <- cloud_metrics(nlas, ~f_canopy_cover_first(Z, ReturnNumber))
 
 print(cover_result_1)
 
+
+#### LiDAR-derived Height Diversity Index (LHDI) ####
+
+lhdi<- cloud_metrics(nlas, func = ~lid_lhdi(Z, interval = 0.5), res = 1) 
+
+####  Canopy Relief Ratio (CRR) ####
+
+f_canopy_relief_ratio <- function(z, threashold = 2 ){
+  z <- as.numeric(z)
+  
+  # Filter out canopy points
+  heights <- z[z >= threashold]
+  
+  # Calculate mean height
+  H_mean <- mean(heights)
+  
+  # Get minimum height
+  H_min <- min(heights)
+  
+  # Get maximum height
+  H_max <- max(heights)
+  
+  # Calculating Canopy relief ratio
+  CRR = (H_mean - H_min)/(H_max - H_min)
+  
+  return(CRR)
+  
+}
+
+canopy_relief_ratio <- cloud_metrics(nlas, func = ~f_canopy_relief_ratio(Z, threashold = 2))
+print(canopy_relief_ratio)

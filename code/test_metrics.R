@@ -1,4 +1,5 @@
 #### Generating LiDAR metrics ####
+# Big job for monday, you need to change all the functions such that they are only looking at the unclassified group of points
 
 setwd("C:/Git repository/Masters_Tim")
 
@@ -10,8 +11,10 @@ library(gstat)
 library(tidyverse)
 library(silviculture)
 library(sf)
-install.packages("forestr")
+library(leafR)
 library(forestr)
+install.packages("leafR")
+
 
 # Loading in data 
 
@@ -20,6 +23,12 @@ print(las)
 
 las_check(las)
 
+writeLAS(nlas, "data/output/W57D_4_norm.las")
+
+#### Standard metrics ####
+
+st_metrics <- cloud_metrics(nlas, func = .stdmetrics)
+print(st_metrics)
 #### Canopy Height #### 
 
 nlas <- normalize_height(las, tin())
@@ -214,7 +223,88 @@ plot_area <- as.numeric(st_area(st_as_sfc(st_bbox(nlas))))
 canopy_height_density <- cloud_metrics(nlas, ~f_canopy_height_density_multi(Z, area = plot_area))
 print(canopy_height_density)
 
+## Canopy point density within threshold bands 
 
+f_canopy_height_density_band <- function(z, ranges = list(c(0.75, 1), c(1, 2), c(2, 9)),area){
+  z <- as.numeric(z)
+  
+  results <- list()
+  for (i in seq_along(ranges)) {
+    min_h <- ranges[[i]][1]
+    max_h <- ranges[[i]][2]
+    
+    range_points <- sum(z >= min_h & z < max_h)
+    
+    # Canopy height density
+    desnsity <- range_points/area
+    
+    # Create name using the current range 
+    range_name <- paste0("density_", min_h, "_", max_h, "m")
+    results[[range_name]] <- round(density, 4)
+    
+  }
+  
+  return(results)
+}
+
+plot_area <- as.numeric(st_area(st_as_sfc(st_bbox(nlas))))
+
+canopy_height_density_band <- cloud_metrics(nlas, ~f_canopy_height_density_band(Z, area = plot_area, ranges = list(c(0.75, 1), c(1, 2), c(2, 9))))
+print(canopy_height_density_band)
+#### Percentage of vegetation found in canopy bands ####
+
+f_vegetation_percentage_band <- function(z, ranges = list(c(0, 0.75), c(0.75, 1), c(1, 2), c(2, 9)),area){
+  z <- as.numeric(z)
+  
+  #Total points
+  total_points <- length(z)
+  
+  results <- list()
+  for (i in seq_along(ranges)) {
+    min_h <- ranges[[i]][1]
+    max_h <- ranges[[i]][2]
+    
+    range_points <- sum(z >= min_h & z < max_h)
+    
+    # Canopy height percentage
+    percentage <- (range_points/area)*100
+    
+    # Create name using the current range 
+    range_name <- paste0("percentage_", min_h, "_", max_h, "m")
+    results[[range_name]] <- round(percentage, 4)
+    
+  }
+  
+  return(results)
+}
+
+vegetation_percentage_band <- cloud_metrics(nlas, ~f_vegetation_percentage_band(Z, area = plot_area, ranges = list(c(0.75, 1), c(1, 2), c(2, 9))))
+print(vegetation_percentage_band)
+
+
+#### Percentage of returns above mean ####
+
+f_percentage_above <- function(z){
+  z <- as.numeric(z)
+  
+  # Mean canopy heights
+  H_bar <- mean(z)
+  
+  # Total number of points 
+  total_points  <- length(z)
+  
+  # Returns above mean
+  return_above <- sum(z >= H_bar)
+  
+  #Calculate percentage of returns above mean
+  percent_above <- return_above/total_points
+  
+  return(percentage_above = round(percent_above * 100, 2))
+  
+}
+
+percentage_above <- cloud_metrics(nlas, ~f_percentage_above(Z))
+print(percentage_above)
 
 #### Distribution of canopy (skewness/kurtoisis) ####
 # Idk if this is based on canopy points or all points
@@ -504,6 +594,7 @@ f_canopy_cover_intensity_multi <- function(z, intensity, threshold = c(0.75,1,2)
 canopy_cover_intensity_multi <- cloud_metrics(nlas, ~f_canopy_cover_intensity_multi(Z, Intensity))
 print(canopy_cover_intensity_multi)
 
+#### Intensity of returns
 #### LiDAR-derived Height Diversity Index (LHDI) ####
 
 lhdi<- cloud_metrics(nlas, func = ~lid_lhdi(Z, interval = 0.5), res = 1) 
@@ -570,11 +661,29 @@ f_canopy_relief_ratio_multi <- function(z, thresholds = c(0.75,1,2) ){
 canopy_relief_ratio_multi <- cloud_metrics(nlas, func = ~f_canopy_relief_ratio_multi(Z))
 print(canopy_relief_ratio_multi)
 
-#### Testing functions from "forestr" ####
+#### Testing functions from "leafR" ####
 
-nlas_df <- payload(nlas)
-las_df <- payload(las)
+lad_voxel <- lad.voxels("data/output/W57D_4_norm.las", grain.size = 1, k = 1)
 
-calc_enl(nlas_df)
-calc_gap_fraction(nlas_df)
-calc_intensity(las_df, "data/raw/2021/W57D_4.las")
+lad_profile <- lad.profile(lad_voxel, relative = TRUE)
+
+# Leaf area index
+
+lai <- lai(lad_profile, min = 1, max = 9)
+
+# Foliage height density: calculated from abundances considered as per-voxel relative LAD values
+
+fhd <- FHD(lad_profile, evenness = TRUE, LAD.threshold = -1)
+
+# Gini coefficient of foliage structural diversity
+
+gc_fsd <- GC("data/output/W57D_4_norm.las", threshold = 1)
+
+# Gini-Simpson index of foliage structural diversity
+
+gs_fsd <- GS(lad_profile, evenness = TRUE, LAD.threshold = -1)
+
+# Leaf area height volume:  cumulative product of canopy height and vegetation density
+
+LAHV(lad_profile, LAI.weighting = FALSE, height.weighting = FALSE)
+

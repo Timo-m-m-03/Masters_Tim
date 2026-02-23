@@ -31,9 +31,12 @@ st_metrics <- cloud_metrics(nlas, func = .stdmetrics)
 print(st_metrics)
 #### Canopy Height #### 
 
-nlas <- normalize_height(las, tin())
+tnlas <- normalize_height(las, tin())
+nlas <- filter_poi(tnlas, Classification != 2)
+plot(nlas, color = "Z", axis = TRUE, legend = TRUE)
 
-plot(nlas, color = ("Classification"))
+
+lidR::plot(nlas, color = "Z")
 
 ## Exploration 
 
@@ -225,8 +228,9 @@ print(canopy_height_density)
 
 ## Canopy point density within threshold bands 
 
-f_canopy_height_density_band <- function(z, ranges = list(c(0.75, 1), c(1, 2), c(2, 9)),area){
+f_vegetation_density_band <- function(z, classification, canopy = 1, ranges = list(c(0, 0.75), c(0.75, 1), c(1, 2), c(2, 9)),area){
   z <- as.numeric(z)
+  
   
   results <- list()
   for (i in seq_along(ranges)) {
@@ -235,12 +239,12 @@ f_canopy_height_density_band <- function(z, ranges = list(c(0.75, 1), c(1, 2), c
     
     range_points <- sum(z >= min_h & z < max_h)
     
-    # Canopy height density
-    desnsity <- range_points/area
+    # Density of points
+    points <- range_points/area
     
     # Create name using the current range 
-    range_name <- paste0("density_", min_h, "_", max_h, "m")
-    results[[range_name]] <- round(density, 4)
+    results[[paste0("density_", min_h, "_", max_h, "m")]] <- points
+   
     
   }
   
@@ -249,37 +253,9 @@ f_canopy_height_density_band <- function(z, ranges = list(c(0.75, 1), c(1, 2), c
 
 plot_area <- as.numeric(st_area(st_as_sfc(st_bbox(nlas))))
 
-canopy_height_density_band <- cloud_metrics(nlas, ~f_canopy_height_density_band(Z, area = plot_area, ranges = list(c(0.75, 1), c(1, 2), c(2, 9))))
+canopy_height_density_band <- cloud_metrics(nlas, ~f_vegetation_density_band(Z, area = plot_area, ranges = list(c(0.75, 1), c(1, 2), c(2, 9))))
 print(canopy_height_density_band)
-#### Percentage of vegetation found in canopy bands ####
 
-f_vegetation_percentage_band <- function(z, ranges = list(c(0, 0.75), c(0.75, 1), c(1, 2), c(2, 9)),area){
-  z <- as.numeric(z)
-  
-  #Total points
-  total_points <- length(z)
-  
-  results <- list()
-  for (i in seq_along(ranges)) {
-    min_h <- ranges[[i]][1]
-    max_h <- ranges[[i]][2]
-    
-    range_points <- sum(z >= min_h & z < max_h)
-    
-    # Canopy height percentage
-    percentage <- (range_points/area)*100
-    
-    # Create name using the current range 
-    range_name <- paste0("percentage_", min_h, "_", max_h, "m")
-    results[[range_name]] <- round(percentage, 4)
-    
-  }
-  
-  return(results)
-}
-
-vegetation_percentage_band <- cloud_metrics(nlas, ~f_vegetation_percentage_band(Z, area = plot_area, ranges = list(c(0.75, 1), c(1, 2), c(2, 9))))
-print(vegetation_percentage_band)
 
 
 #### Percentage of returns above mean ####
@@ -531,6 +507,37 @@ f_canopy_cover_multi <- function(z, thresholds = c(0.75, 1, 2)) {
 cover_all <- cloud_metrics(nlas, ~f_canopy_cover_multi(Z))
 print(cover_all)
 
+## Canopy cover for height threshold bands (cover of vegetation) ##
+
+f_vegetation_percentage_band <- function(z, ranges = list(c(0, 0.75), c(0.75, 1), c(1, 2), c(2, 9))){
+  z <- as.numeric(z)
+  
+  #Total points
+  total_points <- length(z)
+  
+  results <- list()
+  for (i in seq_along(ranges)) {
+    min_h <- ranges[[i]][1]
+    max_h <- ranges[[i]][2]
+    
+    range_points <- sum(z >= min_h & z < max_h)
+    
+    # Canopy height percentage
+    percentage <- (range_points/total_points)*100
+    
+    # Create name using the current range 
+    range_name <- paste0("percentage_", min_h, "_", max_h, "m")
+    results[[range_name]] <- round(percentage, 4)
+    
+  }
+  
+  return(results)
+}
+
+vegetation_percentage_band <- cloud_metrics(nlas, ~f_vegetation_percentage_band(Z, ranges = list(c(0, 0.75),c(0.75, 1), c(1, 2), c(2, 9))))
+print(vegetation_percentage_band)
+
+
 #### Canopy Cover: Intensity ####
 
 # Canopy cover
@@ -593,6 +600,49 @@ f_canopy_cover_intensity_multi <- function(z, intensity, threshold = c(0.75,1,2)
 
 canopy_cover_intensity_multi <- cloud_metrics(nlas, ~f_canopy_cover_intensity_multi(Z, Intensity))
 print(canopy_cover_intensity_multi)
+
+#### Canopy cover by intensity for height threshold bands (cover of vegetation) ####
+
+f_vegetation_intensity_percentage_band <- function(
+    z, intensity,
+    ranges = list(c(0, 0.75), c(0.75, 1), c(1, 2), c(2, 9))
+) {
+  
+  z <- as.numeric(z)
+  intensity <- as.numeric(intensity)
+  
+  total_intensity <- sum(intensity, na.rm = TRUE)
+  
+  # Initialize as a LIST (not numeric vector)
+  results <- list()
+  
+  # If no intensity in this cell, return empty list with NA values
+  if (total_intensity == 0) {
+    for (i in seq_along(ranges)) {
+      min_h <- ranges[[i]][1]
+      max_h <- ranges[[i]][2]
+      results[[paste0("percentage_", min_h, "_", max_h, "m")]] <- NA
+    }
+    return(results)
+  }
+  
+  for (i in seq_along(ranges)) {
+    min_h <- ranges[[i]][1]
+    max_h <- ranges[[i]][2]
+    
+    band_intensity <- sum(intensity[z >= min_h & z < max_h], na.rm = TRUE)
+    
+    percentage <- (band_intensity / total_intensity) * 100
+    
+    # Store in list with proper naming
+    results[[paste0("percentage_", min_h, "_", max_h, "m")]] <- round(percentage, 4)
+  }
+  
+  return(results)
+}
+
+vegetation_intensity_percentage_band <- cloud_metrics(nlas, ~f_vegetation_intensity_percentage_band(Z, Intensity,ranges = list(c(0, 0.75),c(0.75, 1), c(1, 2), c(2, 9))))
+print(vegetation_intensity_percentage_band)
 
 #### Intensity of returns
 #### LiDAR-derived Height Diversity Index (LHDI) ####
